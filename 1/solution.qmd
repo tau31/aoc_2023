@@ -1,0 +1,164 @@
+---
+title: "AOC from 2023 - day 1"
+format:
+  html:
+    embed-resources: true
+---
+
+```{r}
+#| include: false
+library(data.table)
+```
+
+## Today's Link
+
+<https://adventofcode.com/2023/day/1>
+
+## Puzzle's input data
+
+```{r}
+input <- read.delim("input", header = FALSE) |>
+    setDT()
+input
+```
+
+## Part 1
+
+>The newly-improved calibration document consists of lines of text; each line originally contained a specific calibration value that the Elves now need to recover. On each line, the calibration value can be found by combining **the first digit** and the **last digit** (in that order) to form a single two-digit number.
+
+
+>Consider your entire calibration document. What is the sum of all of the calibration values?
+
+### Sample data
+
+```{r}
+sample_1 <- read.delim("sample_1", header = FALSE) |>
+    setDT()
+sample_1
+sample_1_solution <- 142
+```
+
+### Solution
+
+```{r}
+# get_digits
+get_digits <- function(str) {
+    digits_str <- gsub("[^[:digit:]]+", "", str)
+    return(digits_str)
+}
+
+get_first_and_last_digits <- function(digits_str) {
+    n_char <- nchar(digits_str)
+    first <- 1
+    last <- max(1, n_char)
+    first_digit <- substr(digits_str, first, first)
+    last_digit <- substr(digits_str, last, last)
+    res <- paste0(first_digit, last_digit)
+    return(res)
+}
+
+get_calibration_val <- function(str) {
+    val <- str |>
+        get_digits() |>
+        get_first_and_last_digits() |>
+        as.integer()
+    return(val)
+}
+
+```
+
+### Test solution with sample data
+```{r}
+test_sample_1 <- sample_1[, calibration_val := purrr::map_int(V1, get_calibration_val)][, .(sum = sum(calibration_val))]
+
+checkmate::check_set_equal(test_sample_1$sum, sample_1_solution)
+```
+
+### Compute solution
+
+```{r}
+input[, calibration_val := purrr::map_int(V1, get_calibration_val)]
+input[, .(sum = sum(calibration_val))]
+```
+
+## Part 2 
+
+>Your calculation isn't quite right. It looks like some of the digits are actually spelled out with letters: one, two, three, four, five, six, seven, eight, and nine also count as valid "digits".
+
+### Sample data 
+
+```{r}
+sample_2 <- read.delim("sample_2", header = FALSE) |>
+    setDT()
+sample_2
+sample_2_solution <- 281
+```
+
+### Solution
+
+Create map of digits in numeric and digit form. Create a more complex regex to find all elements.
+Then extract all possible digits, and convert the spelled elements to numeric form. then, is just 
+concatenating first and last digits by position and sum the values. 
+
+```{r}
+get_digit_map <- function() {
+    digit_map <- data.frame(
+        number = as.character(1:9),
+        spelled = c("one", "two", "three", "four", "five", "six", "seven", "eight", "nine")
+    )
+}
+
+
+
+get_first_and_last_digits <- function(digits_str) {
+    d_map <- get_digit_map()
+    extract_regex <- d_map$spelled |>
+        append("\\d") |>
+        paste0(collapse = "|") |>
+        (\(x) (sprintf("(%s)", x)))()
+    # now adjustes for cases where two words are nested. e.g. twone or eighthree
+    str_clean <- regmatches(digits_str, regexpr(paste0(".*", extract_regex), digits_str))
+    first <- regmatches(str_clean, regexpr(extract_regex, str_clean))
+    last <- regmatches(str_clean, regexpr(paste0(extract_regex, "$"), str_clean))
+    res <- c(first, last)
+    return(res)
+}
+
+convert_spelled_digits <- function(digits_raw) {
+    d_map <- get_digit_map()
+    spelled_pattern <- paste0(d_map$spelled, collapse = "|")
+    digits <- purrr::map_if(
+        digits_raw,
+        \(x) (grepl(spelled_pattern, x)),
+        \(x) (match(x, d_map$spelled) |> as.character())
+    ) |>
+        unlist()
+
+    return(digits)
+}
+
+get_calibration_val <- function(str) {
+    val <- str |>
+        get_first_and_last_digits() |>
+        convert_spelled_digits() |>
+        paste0(collapse = "") |>
+        as.integer()
+    return(val)
+}
+```
+
+### Test solution to puzzle 2
+
+```{r}
+test_sample_2 <- sample_2[, calibration_val := purrr::map_int(V1, get_calibration_val)][, .(sum = sum(calibration_val))]
+checkmate::check_set_equal(test_sample_2$sum, sample_2_solution)
+```
+
+### Compute solution
+
+With newly adjusted code.
+
+```{r}
+input[, calibration_val := purrr::map_int(V1, get_calibration_val)]
+input[, .(sum = sum(calibration_val))]
+```

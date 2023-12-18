@@ -1,0 +1,236 @@
+---
+title: "AOC from 2023 - day 5"
+format:
+  html:
+    embed-resources: true
+---
+```{r}
+#| include: false
+library(data.table)
+library(purrr)
+library(RcppInt64)
+```
+
+## Today's Link
+
+<https://adventofcode.com/2023/day/5>
+
+## Puzzle's input data
+
+```{r}
+input <- readLines("input")
+```
+
+
+## Part 1
+
+### Sample data
+
+```{r}
+sample <- readLines("sample_1")
+sample_1_solution <- 35
+```
+
+### Parse data
+
+```{r}
+get_seeds <- function(input_txt) {
+    str <- grep("seeds", input_txt, value = TRUE)
+    seeds <- regmatches(str, gregexpr("\\d+", str)) |>
+        unlist() |>
+        as.double()
+    # bit64::as.integer64()
+    return(seeds)
+}
+
+prepare_almanac <- function(input_txt) {
+    labels_pos <- grep("map", input_txt)
+    end_file <- length(input_txt)
+
+    map_raw <- data.table(label_pos = grep("map", input_txt))
+    map_raw[, `:=`(
+        row_start = label_pos + 1,
+        row_end = shift(label_pos - 1, type = "lead", fill = length(input_txt))
+    )]
+    map_raw[, `:=`(
+        label = gsub("\\s+map:", "", input_txt[label_pos]),
+        rows = map2(row_start, row_end, \(x, y) (input_txt[x:y]))
+    )]
+    map_raw[, label := factor(label, levels = unique(label))]
+
+    almanac <- map_raw[, .(row = rows[[1]]), by = label][nchar(row) > 0, ]
+    almanac[, row_info := map(
+        row,
+        \(x) ({
+            digits <- strsplit(x, "\\s+") |>
+                unlist() |>
+                as.double()
+            # bit64::as.integer64()
+            destination <- 1
+            source <- 2
+            range <- 3
+            res <- data.table(
+                in_start = digits[[source]],
+                in_end = digits[[source]] + digits[[range]] - 1,
+                out_start = digits[[destination]],
+                out_end = digits[[destination]] + digits[[range]] - 1
+            )
+            return(res)
+        })
+    )]
+    almanac <- almanac[, row_info[[1]], by = .(label, row)]
+    almanac[, row := NULL]
+    almanac <- almanac |>
+        (\(x) (split(x, x$label)))()
+
+    return(almanac)
+}
+# parse_maps
+
+# 1 destination
+# 2 source
+# 3 range
+
+map_values <- function(value, map_tbl) {
+    res <- value
+    mapped <- map_tbl[value %between% .(in_start, in_end), ]
+
+    if (nrow(mapped) > 0) {
+        res <- mapped$out_start + value - mapped$in_start
+    }
+    return(res)
+}
+
+seed_to_location <- function(seeds, almanac) {
+    res <- seeds
+    for (map in almanac) {
+        res <- map(res, \(v) (map_values(v, map))) |> unlist()
+    }
+    return(res)
+}
+
+solution_part_1 <- function(input_txt) {
+    seeds <- get_seeds(input_txt)
+    almanac <- prepare_almanac(input_txt)
+    locs <- seed_to_location(seeds, almanac)
+    res <- min(locs)
+    return(res)
+}
+```
+
+### Test
+
+```{r}
+solution_part_1(sample) == sample_1_solution 
+```
+
+### Compute solution
+
+
+```{r}
+solution_part_1(input)
+
+```
+
+## Part 2
+
+Seeds line describes pairs of ranges and not individual seeds.
+For example, `79 14` describes the range starting at 79 and ending in 92. 
+
+### Solution
+
+
+```{r}
+get_seed_ranges <- function(input_txt) {
+    str <- grep("seeds", input_txt, value = TRUE)
+    ranges <- regmatches(str, gregexpr("\\d+\\s+\\d+", str)) |>
+        unlist() |>
+        map_dfr(\(x) ({
+            pair <- x |>
+                strsplit("\\s+") |>
+                unlist() |>
+                as.double()
+            range <- data.table(min = pair[1], max = pair[1] + pair[2] - 1)
+            # seeds <- seq(range[1], range[1] + range[2] - 1)
+            return(range)
+        }))
+    return(ranges)
+}
+
+do_ranges_overlap <- function(start_1, end_1, start_2, end_2) {
+    # (StartA <= EndB) and (EndA >= StartB) from
+    #  https://stackoverflow.com/questions/325933/determine-whether-two-date-ranges-overlap/325964#325964
+    (start_1 <= end_2) && (end_1 >= start_2)
+}
+
+get_overlapping_range <- function(start_1, end_1, start_2, end_2) {
+    overlap <- NA
+    if (do_ranges_overlap(start_1, end_1, start_2, end_2)) {
+        overlap <- data.table(o_start = max(start_1, start_2), o_end = min(end_1, end_2))
+    }
+    return(overlap)
+}
+
+seed_range_to_min_location <- function(seeds, almanac) {
+    res <- seeds
+
+    pmap(seeds, \(min, max) ({
+        message("----------")
+        message("seed range: ", min, ":", max)
+        res <- data.table(min, max)
+        for (map_tbl in almanac) {
+            
+            # create table with input and mapping values
+            mapper <- as.data.table(tidyr::crossing(res, map_tbl))
+            setorder(mapper, in_start)
+            # get overlapping ranges
+            overlaps <- mapper[, overlap := pmap(list(min, max, in_start, in_end), get_overlapping_range)
+                                ][!is.na(overlap), ]
+            # If there is any overlap, map source values to destination values
+            if (nrow(overlaps) > 0) {
+                res <- pmap(
+                    overlaps[, .(in_start, out_start, overlap)],
+                    \(in_start, out_start, overlap)({
+                        mapped <- out_start + overlap - in_start
+                        setnames(mapped, names(mapped), c("min", "max"))
+                        return(mapped)
+                    })
+                ) |>
+                    rbindlist()
+                # Because destination value ranges are joint (i.e., [1,2], [3,4] and [5, 19])
+                # we can just check if the mapped range contains all the source range values. If there any destination
+                # values below or outside the mapped range, we can just append them these ranges to the destination
+                # output 
+                if (min(overlaps$min) < min(overlaps$in_start)) {
+                    res <- rbind(res, data.table(min = min(overlaps$min), max = min(overlaps$in_start) - 1))
+                }
+
+                if (max(overlaps$max) > max(overlaps$in_end)) {
+                    res <- rbind(res, data.table(min = max(overlaps$in_end) + 1, max = max(overlaps$max)))
+                }
+            }
+        }
+        # at each seed we can just take the minimum value of the output
+        min_location <- min(res$min)
+        message("min -----> ", min_location)
+        return(min_location)
+    })) |>
+        unlist()
+}
+
+solution_part_2 <- function(input_txt) {
+    seeds <- get_seed_ranges(input_txt)
+    almanac <- prepare_almanac(input_txt)
+    min_locations <- seed_range_to_min_location(seeds, almanac)
+    solution <- min(min_locations)
+    return(solution)
+}
+
+
+```
+
+### Test and Get solution
+```{r}
+solution_part_2(sample) == 46
+solution_part_2(input)
+```

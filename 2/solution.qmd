@@ -1,0 +1,172 @@
+---
+title: "AOC from 2023 - day 2"
+format:
+  html:
+    embed-resources: true
+---
+
+```{r}
+#| include: false
+library(data.table)
+library(stringr)
+library(purrr)
+```
+
+## Today's Link
+
+<https://adventofcode.com/2023/day/2>
+
+## Description
+
+> As you walk, the Elf shows you a small bag and some cubes which are either red, green, or blue. Each time you play this game, he will hide a secret number of cubes of each color in the bag, and your goal is to figure out information about the number of cubes.
+
+>To get information, once a bag has been loaded with cubes, the Elf will reach into the bag, grab a handful of random cubes, show them to you, and then put them back in the bag. He'll do this a few times per game.
+
+>You play several games and record the information from each game (your puzzle input). Each game is listed with its ID number (like the 11 in Game 11: ...) followed by a semicolon-separated list of subsets of cubes that were revealed from the bag (like 3 red, 5 green, 4 blue).
+
+>For example, the record of a few games might look like this:
+
+```
+Game 1: 3 blue, 4 red; 1 red, 2 green, 6 blue; 2 green
+Game 2: 1 blue, 2 green; 3 green, 4 blue, 1 red; 1 green, 1 blue
+Game 3: 8 green, 6 blue, 20 red; 5 blue, 4 red, 13 green; 5 green, 1 red
+Game 4: 1 green, 3 red, 6 blue; 3 green, 6 red; 3 green, 15 blue, 14 red
+Game 5: 6 red, 1 blue, 3 green; 2 blue, 1 red, 2 green
+```
+
+>In game 1, three sets of cubes are revealed from the bag (and then put back again). The first set is 3 blue cubes and 4 red cubes; the second set is 1 red cube, 2 green cubes, and 6 blue cubes; the third set is only 2 green cubes.
+
+>The Elf would first like to know which games would have been possible if the bag contained only 12 red cubes, 13 green cubes, and 14 blue cubes?
+
+## Puzzle's input data
+
+```{r}
+input <- read.delim("input", header = FALSE) |>
+    setDT()
+head(input)
+```
+
+## Part 1
+
+### Sample 
+
+```{r}
+sample_1 <- read.delim("sample_1", header = FALSE) |>
+    setDT()
+sample_1
+sample_1_solution <- 8
+```
+
+### Solution
+
+```{r}
+extract_game_id <- \(str) (str_extract(str, "\\d{1,}") |> as.integer())
+extract_sets_to_list <- \(str) ({
+    sets_l <- sub("Game \\d{1,}:", "", str) |>
+        stringr::str_split(";") |>
+        unlist()
+    return(sets_l)
+})
+
+sets_list_to_dt <- \(sets_list) ({
+    sets_list |>
+        imap(\(set, id) ({
+            set_dt <- data.table(
+                set = id,
+                red_cubes = str_extract(set, "\\d+(?=\\s+red)"),
+                green_cubes = str_extract(set, "\\d+(?=\\s+green)"),
+                blue_cubes = str_extract(set, "\\d+(?=\\s+blue)")
+            )
+
+            cube_cols <- grep("cubes", names(set_dt), value = TRUE)
+            set_dt[, (cube_cols) := map(.SD, \(col) ({
+                new_col <- as.integer(col) |> fcoalesce(0L)
+                return(new_col)
+            })), .SDcols = cube_cols]
+
+            return(set_dt)
+        })) |>
+        rbindlist()
+})
+
+prepare_game_data <- function(input) {
+    checkmate::assert_data_table(input, min.rows = 1)
+    raw_input <- copy(input)
+    games_dt <- raw_input[, game_id := extract_game_id(V1)
+      ][, plays := map(V1, \(x) (x |> extract_sets_to_list() |> sets_list_to_dt()))
+        ][, plays[[1]], by = game_id]
+}
+
+compute_possible_ids_sum <- function(game_data) {
+    data_copy <- copy(game_data) 
+    possible_ids <- data_copy[, is_set_impossible := red_cubes > 12 || green_cubes > 13 || blue_cubes > 14, by = .(game_id, set)
+            ][, is_game_impossible := any(is_set_impossible), by = game_id
+              ][!(is_game_impossible), unique(game_id)]
+
+    sum_possible_ids <- sum(possible_ids)
+    return(sum_possible_ids)
+}
+```
+
+### Test on sample
+
+```{r}
+sample_games <- prepare_game_data(sample_1)
+sample_sum <- compute_possible_ids_sum(sample_games)
+checkmate::check_true(sample_sum == sample_1_solution)
+```
+
+### Solution
+
+
+```{r}
+game_data <- prepare_game_data(input)
+solution_res <- compute_possible_ids_sum(game_data)
+solution_res
+```
+
+## Part 2
+
+>As you continue your walk, the Elf poses a second question: in each game you played, what is the fewest number of cubes of each color that could have been in the bag to make the game possible?
+
+>For each game, find the minimum set of cubes that must have been present. What is the sum of the power of these sets?
+
+### Sample 
+
+The example is the same, so I can use the same data 
+
+```{r}
+sample_games
+sample_2_solution <- 2286
+```
+
+### Solution
+
+```{r}
+compute_power_sum <- function(input) {
+    checkmate::assert_data_table(input, min.rows = 1)
+    input_copy <- copy(input)
+    game_data <- prepare_game_data(input_copy)
+    game_data_long <- melt(game_data, id.vars = c("game_id", "set"), variable.name = "cube_color")
+    min_set_by_game <- game_data_long[, .(min_val = max(value)), by = .(game_id, cube_color)] |> setorder(game_id, cube_color)
+    power_by_game <- min_set_by_game[, .(power = prod(min_val)), by = game_id]
+    power_sum <- sum(power_by_game$power)
+    return(power_sum)
+}
+
+```
+
+### Testing 
+
+
+```{r}
+sample_power <- compute_power_sum(sample_1)
+checkmate::check_true(sample_power == sample_2_solution)
+```
+
+### Get solution
+
+```{r}
+input_power <- compute_power_sum(input)
+input_power
+```

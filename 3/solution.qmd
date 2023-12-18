@@ -1,0 +1,229 @@
+---
+title: "AOC from 2023 - day 3"
+format:
+  html:
+    embed-resources: true
+---
+
+```{r}
+#| include: false
+library(data.table)
+library(purrr)
+```
+
+## Today's Link
+
+<https://adventofcode.com/2023/day/3>
+
+## Puzzle's input data
+
+```{r}
+input <- read.delim("input", header = FALSE) |>
+    setDT()
+```
+
+## Part 1
+
+>The engineer explains that an engine part seems to be missing from the engine, but nobody can figure out which one. If you can add up all the part numbers in the engine schematic, it should be easy to work out which part is missing.
+
+>The engine schematic (your puzzle input) consists of a visual representation of the engine. There are lots of numbers and symbols you don't really understand, but apparently any number adjacent to a symbol, even diagonally, is a "part number" and should be included in your sum. (Periods (.) do not count as a symbol.)
+
+
+### Sample 
+```{r}
+sample_1 <- read.delim("sample_1", header = FALSE) |>
+    setDT()
+sample_1_solution <- 4361
+```
+
+### Solution
+
+```{r}
+get_schematics <- function(input) {
+    input_copy <- copy(input)
+    input_copy[, rows := map(V1, \(x) ({
+        chars <- strsplit(x, "") |> unlist()
+        tbl <- as.list(chars) |> setDT()
+        colnames(tbl) <- seq_len(length(chars)) |> as.character()
+        return(tbl)
+    }))]
+    schematics <- rbindlist(input_copy$rows) |> as.matrix()
+    return(schematics)
+}
+
+
+get_valid_symbols <- function(schematics) {
+    symbols <- grep("\\d|\\.", schematics, invert = TRUE, value = TRUE) |>
+        unique()
+}
+
+# create digits table
+create_digits_table <- function(input) {
+    input_cp <- copy(input)
+    input_cp[, row := .I]
+    input_cp[, info := map2(V1, row, \(x, row)({
+        # NOTE gregexpr returns -1 when there is no match
+        digit_info <- gregexpr("\\d+", x)
+        digits_start <- unlist(digit_info)
+        digits_end <- attr(digit_info[[1]], "match.length") + digits_start - 1
+        digits <- regmatches(x, digit_info) |> unlist()
+        
+        tbl <- data.table(
+            id = sprintf("%s_%s_%s", row, digits_start, digits_end),
+            digit = digits,
+            row = row,
+            col_start = digits_start,
+            col_end = digits_end
+        )
+        return(tbl)
+    }))]
+
+    digit_coordinates <- rbindlist(input_cp$info)
+    return(digit_coordinates)
+}
+
+get_adjacent_cells <- function(digits_tbl, schematics) {
+    tbl <- copy(digits_tbl)
+    # get grid of surrounding cells for each digit by position
+    tbl[, grid := pmap(list(row, col_start, col_end), function(digit_row, col_s, col_e) {
+        # get schematics limits (to avoid selecting elements out of scope on the schematics)
+        schema_row_lim <- nrow(schematics)
+        schema_col_lim <- ncol(schematics)
+
+        # If we know the positions of each digit in the schematics, can get the positions of the square around
+        # the digit positions and get their elements by position in the schematics
+
+        # First, we get the horizontal and vertical windows around the digit positions
+        h_window <- seq(from = max(1, col_s - 1), to = min(col_e + 1, schema_col_lim))
+        v_window <- seq(from = max(1, digit_row - 1), to = min(digit_row + 1, schema_row_lim))
+        coord_grid <- expand.grid(v_window, h_window) |> setDT()
+        names(coord_grid) <- c("row", "col")
+        setorder(coord_grid, row)
+
+        # Second we remove the remove digit coordinates (since we already know the contain the digits)
+        coord_grid <- coord_grid[!(row == digit_row & col %between% c(col_s, col_e))]
+        # Finally, we extract the corresponding symbol for each surrounding cell from the schematics
+        coord_grid[, symbol := map2_chr(row, col, \(x, y) ({
+            res <- schematics[x, y]
+            return(res)
+        }))]
+        return(coord_grid)
+    })]
+}
+
+
+check_if_digit_is_valid <- function(tbl, valid_symbols) {
+    tbl_cp <- copy(tbl)
+    tbl_cp[, is_adjacent_to_symbol := purrr::map_lgl(grid, \(g) (any(g$symbol %in% valid_symbols)))]
+    return(tbl_cp)
+}
+
+sum_valid_digits <- function(tbl) {
+    res <- tbl[(is_adjacent_to_symbol), sum(as.integer(digit))]
+    return(res)
+}
+
+compute_solution <- function(input) {
+    input_cp <- copy(input)
+    schematics <- get_schematics(input_cp)
+    valid_symbols <- get_valid_symbols(schematics)
+    res <- input_cp |>
+        create_digits_table() |>
+        get_adjacent_cells(schematics) |>
+        check_if_digit_is_valid(valid_symbols) |>
+        sum_valid_digits()
+    return(res)
+}
+```
+
+### Test Solution 
+```{r}
+res <- compute_solution(sample_1)
+checkmate::check_true(res == sample_1_solution)
+```
+
+### Compute result
+
+```{r}
+compute_solution(input)
+```
+
+## Part 2 
+
+>A gear is any * symbol that is adjacent to exactly two part numbers. Its gear ratio is the result of multiplying those two numbers together.
+
+```{r}
+sample_2_solution <- 467835
+```
+
+
+```{r}
+get_gear_info <- function(tbl) {
+    tbl_cp <- copy(tbl)
+    tbl_cp[, adjacent_to_gear := map_lgl(grid, \(x) (any(x$symbol == "*")))]
+    res <-
+        tbl_cp[(adjacent_to_gear), gears_list := map(
+            grid,
+            \(x)({
+                gears <- x[symbol == "*", ][, .(gear_coord = paste(row, col, sep = "_"))]
+                return(gears)
+            })
+        )][, gears_list[[1]], by = .(id, digit)]
+    return(res)
+}
+
+filter_two_part_numbers <- function(tbl) {
+    tbl_cp <- copy(tbl)
+    tbl_cp[, n_digits_near_gear := .N, by = .(gear_coord)]
+    res <- tbl_cp[n_digits_near_gear > 1, ]
+    return(res)
+}
+
+compute_gear_ratio_sum <- function(tbl) {
+    tbl_cp <- copy(tbl)
+    res <- tbl_cp[, .(gear_ratio = prod(as.integer(digit))), by = gear_coord][, sum(gear_ratio)]
+    return(res)
+}
+
+
+compute_solution_part_2 <- function(input) {
+    input_cp <- copy(input)
+    schematics <- get_schematics(input_cp)
+    tbl <- input_cp |>
+        create_digits_table() |>
+        get_adjacent_cells(schematics) |>
+        get_gear_info() |>
+        filter_two_part_numbers()
+
+    res <- compute_gear_ratio_sum(tbl)
+    return(res)
+}
+```
+
+### Test solution
+
+```{r}
+res <- compute_solution_part_2(sample_1)
+checkmate::check_true(res == sample_2_solution)
+```
+
+### Solution
+
+```{r}
+solution_2 <- compute_solution_part_2(input)
+solution_2
+```
+
+
+I had to add an unique id per digit. Otherwise the grouping wasn't exhaustive and same numbers were not all picked up. 
+
+```{r}
+test <- data.table(V1 = c(
+    "..2..",
+    "...*.",
+    "....2"
+))
+
+compute_solution_part_2(test) == 4
+
+```

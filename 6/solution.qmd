@@ -1,0 +1,42 @@
+---
+title: "AOC from 2023 - day 6"
+format:
+  html:
+    embed-resources: true
+---
+
+```{r}
+#| include: false
+library(data.table)
+```
+
+## Today's Link
+
+<https://adventofcode.com/2023/day/6>
+
+## Puzzle's input data
+
+```{r}
+input <- read.delim("input", header = FALSE) |>
+    setDT()
+input
+```
+
+```{r}
+sample <- read.delim("6/sample", header = FALSE) |> setDT()
+```
+
+
+```{r}
+input_txt <- sample
+prepare_race_data <- function(input_txt) {
+    values <- input_txt[, vals := {
+        vals <- stringr::str_extract_all(V1, "\\d+")
+        vals <- purrr::map(vals, as.integer)
+    }][, vals]
+    names(values) <- c("time", "dist")
+    race_data <- as.data.table(values)
+    return(race_data)
+}
+
+```

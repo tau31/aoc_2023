@@ -1,0 +1,187 @@
+---
+title: "AOC from 2023 - day 4"
+format:
+  html:
+    embed-resources: true
+---
+
+```{r}
+#| include: false
+library(data.table)
+library(purrr)
+```
+
+## Today's Link
+
+<https://adventofcode.com/2023/day/4>
+
+## Puzzle's input data
+
+```{r}
+input <- read.delim("input", header = FALSE) |>
+    setDT()
+input
+```
+
+## Part 1
+
+>There, you discover dozens of scratchcards, all with their opaque covering already scratched off. Picking one up, it looks like each card has two lists of numbers separated by a vertical bar (|): a list of winning numbers and then a list of numbers you have. You organize the information into a table (your puzzle input).
+
+>As far as the Elf has been able to figure out, you have to figure out which of the numbers you have appear in the list of winning numbers. The first match makes the card worth one point and each match after the first doubles the point value of that card.
+
+>In the above example, card 1 has five winning numbers (41, 48, 83, 86, and 17) and eight numbers you have (83, 86, 6, 31, 17, 9, 48, and 53). Of the numbers you have, four of them (48, 83, 17, and 86) are winning numbers! That means card 1 is worth 8 points (1 for the first match, then doubled three times for each of the three matches after the first).
+
+```
+    Card 2 has two winning numbers (32 and 61), so it is worth 2 points.
+    Card 3 has two winning numbers (1 and 21), so it is worth 2 points.
+    Card 4 has one winning number (84), so it is worth 1 point.
+    Card 5 has no winning numbers, so it is worth no points.
+    Card 6 has no winning numbers, so it is worth no points.
+```
+>So, in this example, the Elf's pile of scratchcards is worth 13 points.
+
+>Take a seat in the large pile of colorful cards. How many points are they worth in total?
+
+### Sample
+
+```{r}
+sample_1 <- read.delim("sample_1", header = FALSE) |> setDT()
+sample_1
+sample_1_solution <- 13
+```
+
+### Solution
+
+```{r}
+parse_card_numbers <- function(card_str) {
+    numbers_l <- sub(".*:", "", card_str) |>
+        strsplit("\\|") |>
+        unlist() |>
+        map(\(x) (regmatches(x, gregexpr("\\d+", x))))
+    names(numbers_l) <- c("winning_list", "gotten")
+    numbers_dt <- as.data.table(numbers_l)
+    return(numbers_dt)
+}
+
+prepare_game_data <- function(input) {
+    tbl <- copy(input)
+    tbl[, card := .I]
+    tbl[, numbers := map(V1, parse_card_numbers)]
+    games <- tbl[, numbers[[1]], by = card]
+    games[, won := map2(winning_list, gotten, \(x, y) (intersect(x, y)))]
+    return(games)
+}
+
+compute_points <- function(tbl) {
+  tbl_cp <- copy(tbl) 
+  tbl_cp[, points := map_int(won, \(x) ({
+    n_won <- length(x)
+    res <- 0
+    if (n_won > 0) {
+      exponent <- n_won - 1
+      res <- 2^exponent
+    }
+    return(res)
+  }))]
+}
+
+compute_part_1_solution <- function(input) {
+  tbl <- copy(input)
+  games <- prepare_game_data(tbl) |>
+  compute_points()
+
+  res <- games[, sum(points)]
+  return(res)
+} 
+```
+
+### Test
+
+```{r}
+res <- compute_part_1_solution(sample_1)
+res == sample_1_solution
+```
+
+### Result
+
+```{r}
+p1_solution <- compute_part_1_solution(input)
+p1_solution
+```
+
+
+## Part 2
+
+### Sample 
+
+```{r}
+sample_2 <- copy(sample_1)
+sample_2_solution <- 30
+```
+
+### solution
+
+```{r}
+get_matches <- function(tbl) {
+    tbl_cp <- copy(tbl)
+    tbl_cp[, n_matches := map_int(won, length)]
+    return(tbl_cp)
+}
+
+get_copies <- function(tbl) {
+    new_tbl <- copy(tbl)
+    new_tbl[, copies := map2(card, n_matches, \(i, n_m) ({
+        copies <- NA
+        if (n_m > 0) {
+            copies <- seq(from = i + 1, to = min(i + n_m, nrow(.SD)))
+        }
+        return(copies)
+    }))]
+    new_tbl <- new_tbl[, .(card, copies)]
+    setkey(new_tbl, card)
+    return(new_tbl)
+}
+
+count_cards <- function(card_i, tbl) {
+    new_tbl <- copy(tbl)
+    new_copies <- new_tbl[card_i, unlist(copies)]
+    n_cards <- new_tbl[card_i, n_copies]
+    new_tbl <- new_tbl[new_copies, n_copies := n_copies + n_cards]
+    return(new_tbl)
+}
+
+compute_solution_part_2 <- function(input) {
+    tbl <- copy(input)
+    cards <- tbl |>
+        prepare_game_data() |>
+        get_matches() |>
+        get_copies()
+    
+    # Init count
+    cards[, n_copies := 1] 
+
+    n_cards <- seq_len(nrow(cards))
+    cards_counted <- copy(cards)
+    for (i in n_cards) {
+        cards_counted <- count_cards(i, cards_counted)
+    }
+
+    card_sum <- sum(cards_counted$n_copies)
+    return(card_sum)
+}   
+```
+
+### Test in Sample
+
+```{r}
+res <- compute_solution_part_2(sample_2)
+res == sample_2_solution
+```
+
+### Part 2 solution 
+
+```{r}
+res <- compute_solution_part_2(input)
+res
+```
+
