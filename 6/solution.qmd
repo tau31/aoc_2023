@@ -23,14 +23,45 @@ input
 ```
 
 ```{r}
-sample <- read.delim("6/sample", header = FALSE) |> setDT()
+sample <- read.delim("sample", header = FALSE) |> setDT()
 ```
 
 
 ```{r}
-input_txt <- sample
+
+```
+
+time is fixed 
+we want to maximize distance
+
+ = dist
+0 = 0
+press * 0 = 0
+press * 1  = 6 * 1
+press * 2 = 5 * 2
+press * 3 = 4 * 3
+press * 4 = 3 * 4
+press * 5 = 2 * 5
+press * 6 = 1 * 6
+press * 7 = 0 * 7
+
+distance = press - (max_time - press) * press 
+0 =  (7 - 0) * 0 - 0
+distance = - press + (max_tie - press) * press 
+0 = (7 - 0) * 0
+6  = (7 - 1) * 1
+10 = (7 - 2) * 2
+12 = (7 - 3) * 3
+
+```{r}
+compute_dist_fun <- function(max_time, press) {
+    dist <- (max_time - press) * press
+    return(dist)
+}
+
 prepare_race_data <- function(input_txt) {
-    values <- input_txt[, vals := {
+    input_new <- copy(input_txt)
+    values <- input_new[, vals := {
         vals <- stringr::str_extract_all(V1, "\\d+")
         vals <- purrr::map(vals, as.integer)
     }][, vals]
@@ -39,4 +70,66 @@ prepare_race_data <- function(input_txt) {
     return(race_data)
 }
 
+calc_n_races_above_record <- function(tbl) {
+    tbl_new <- copy(tbl)
+    tbl_new[, n_above_record := purrr::map2_int(time, dist, \(t, d) ({
+        possible_races <- compute_dist_fun(t, 0:t)
+        res <- sum(possible_races > d)
+        return(res)
+    }))]
+    return(tbl_new)
+}
+
+
+solution_part_1 <- function(input_txt) {
+    race_data <- prepare_race_data(input_txt)
+    race_data <- calc_n_races_above_record(race_data)
+    return(race_data[, prod(n_above_record)])
+}
+```
+
+
+```{r}
+solution_part_1(sample) == 288
+solution_part_1(input)
+```
+
+### Part 2
+
+
+```{r}
+prepare_race_data <- function(input_txt) {
+    input_new <- copy(input_txt)
+
+    time <- stringr::str_extract_all(input_new[1, V1], "\\d+") |>
+        unlist() |>
+        paste0(collapse = "") |>
+        bit64::as.integer64()
+
+    dist <- stringr::str_extract_all(input_new[2, V1], "\\d+") |>
+        unlist() |>
+        paste0(collapse = "") |>
+        bit64::as.integer64()
+
+    race_data <- data.table(
+        time = time,
+        dist = dist
+    )
+    return(race_data)
+}
+
+solution_part_2 <- function(input_txt) {
+    race_data <- prepare_race_data(input_txt)
+    tbl_new <- copy(race_data)
+    tbl_new[, n_above_record := purrr::map2_int(time, dist, \(t, d) ({
+        possible_races <- compute_dist_fun(t, bit64::seq.integer64(0, t))
+        res <- sum(possible_races > d)
+        return(res)
+    }))]
+    
+    return(tbl_new$n_above_record)
+}
+
+solution_part_2(sample) == 71503
+solution_part_2(input)
 ```
